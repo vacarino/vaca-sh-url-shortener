@@ -130,10 +130,56 @@ sudo mysql -u root -p${DB_PASS} -e "DELETE FROM mysql.db WHERE Db='test' OR Db='
 
 # Create application database and user
 log "Creating database and user..."
+
+# Check MySQL version for compatibility
+MYSQL_VERSION=$(sudo mysql -u root -p${DB_PASS} -e "SELECT VERSION();" -s -N | cut -d'.' -f1)
+info "MySQL version detected: $MYSQL_VERSION"
+
+# Drop existing database if it exists
+log "Cleaning up existing database..."
+sudo mysql -u root -p${DB_PASS} -e "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+
+# Drop existing user - handle different MySQL versions
+log "Cleaning up existing user..."
+if [ "$MYSQL_VERSION" -ge 5 ]; then
+    # MySQL 5.7+ supports IF EXISTS
+    sudo mysql -u root -p${DB_PASS} -e "DROP USER IF EXISTS '${DB_USER}'@'localhost';" 2>/dev/null || true
+else
+    # Older MySQL versions - check if user exists first
+    USER_EXISTS=$(sudo mysql -u root -p${DB_PASS} -e "SELECT EXISTS(SELECT 1 FROM mysql.user WHERE user = '${DB_USER}' AND host = 'localhost')" -s -N)
+    if [ "$USER_EXISTS" = "1" ]; then
+        sudo mysql -u root -p${DB_PASS} -e "DROP USER '${DB_USER}'@'localhost';" || true
+    fi
+fi
+
+# Small delay to ensure cleanup is complete
+sleep 2
+
+# Create fresh database and user
+log "Creating fresh database '${DB_NAME}'..."
 sudo mysql -u root -p${DB_PASS} -e "CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+log "Creating user '${DB_USER}'..."
 sudo mysql -u root -p${DB_PASS} -e "CREATE USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';"
+
+log "Granting privileges..."
 sudo mysql -u root -p${DB_PASS} -e "GRANT ALL PRIVILEGES ON ${DB_NAME}.* TO '${DB_USER}'@'localhost';"
 sudo mysql -u root -p${DB_PASS} -e "FLUSH PRIVILEGES;"
+
+# Verify the user was created successfully
+log "Verifying database setup..."
+if sudo mysql -u root -p${DB_PASS} -e "SELECT User FROM mysql.user WHERE User='${DB_USER}';" 2>/dev/null | grep -q "${DB_USER}"; then
+    info "✅ Database user '${DB_USER}' created successfully"
+else
+    error "❌ Failed to create database user '${DB_USER}'"
+fi
+
+# Test connection with new user
+if sudo mysql -u ${DB_USER} -p${DB_PASS} -e "USE ${DB_NAME}; SELECT 'Connection successful' as test;" 2>/dev/null; then
+    info "✅ Database connection test successful"
+else
+    warning "⚠️  Database connection test failed - will retry during Laravel setup"
+fi
 
 # =============================================================================
 # STEP 4: Install Nginx
