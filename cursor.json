@@ -1,0 +1,8 @@
+{
+  "globalIgnore": [
+    "node_modules",
+    "vendor",
+    "*.lock",
+    "*.zip"
+  ]
+} 
